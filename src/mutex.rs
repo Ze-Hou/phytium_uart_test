@@ -26,7 +26,10 @@ impl<T> Mutex<T> {
         self.inner
             .store(false, core::sync::atomic::Ordering::Release);
     }
-    /// get inner on s
+
+    // # Safety: This function is unsafe because it allows mutable access to the inner data
+    // while the mutex is locked. This can lead to data races if not used carefully.
+    #[allow(clippy::mut_from_ref)]
     pub unsafe fn force_use(&self) -> &mut T {
         unsafe { &mut *self.data.get() }
     }
