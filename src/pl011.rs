@@ -1,13 +1,9 @@
-use tock_registers::{
-    interfaces::{ReadWriteable, Writeable, Readable},
-    register_structs, register_bitfields,
-    registers::{
-        ReadWrite,
-        ReadOnly,
-        WriteOnly,
-    },
-};
 use core::ptr::NonNull;
+use tock_registers::{
+    interfaces::{ReadWriteable, Readable, Writeable},
+    register_bitfields, register_structs,
+    registers::{ReadOnly, ReadWrite, WriteOnly},
+};
 
 /*
  * UART寄存器映射（参考芯片手册表5-63）：
@@ -215,9 +211,7 @@ impl Pl011Uart {
         }
     }
     const fn regs(&self) -> &Pl011UartRegs {
-        unsafe {
-            self.base.as_ref()
-        }
+        unsafe { self.base.as_ref() }
     }
 
     // 设置波特率
@@ -226,7 +220,8 @@ impl Pl011Uart {
         // UART 控制器（非 MIO 配置） 主时钟为 100MHz
         let freq = 100_000_000;
         let divint = (freq / (16 * baudrate)) as u32;
-        let divfrac = (((freq % (16 * baudrate)) * 64 + (16 * baudrate / 2)) / (16 * baudrate)) as u32;
+        let divfrac =
+            (((freq % (16 * baudrate)) * 64 + (16 * baudrate / 2)) / (16 * baudrate)) as u32;
 
         self.regs().ibrd.write(IBRD::DIVINT.val(divint));
         self.regs().fbrd.write(FBRD::DIVFRAC.val(divfrac));
@@ -238,20 +233,22 @@ impl Pl011Uart {
         // 设置波特率为115200
         self.set_baudrate(115200);
         // 设置数据位为8位，停止位为1位，无奇偶校验，使能FIFO
-        self.regs().lcr_h.write(
-            LCRH::WLEN::len8 + LCRH::STP2::CLEAR + LCRH::PEN::CLEAR + LCRH::FEN::SET
-        );
+        self.regs()
+            .lcr_h
+            .write(LCRH::WLEN::len8 + LCRH::STP2::CLEAR + LCRH::PEN::CLEAR + LCRH::FEN::SET);
         // 失能中断
         self.regs().imsc.set(0);
         // 使能UART, 发送与接收
-        self.regs().cr.modify(CR::UARTEN::SET + CR::TXE::SET + CR::RXE::SET);
+        self.regs()
+            .cr
+            .modify(CR::UARTEN::SET + CR::TXE::SET + CR::RXE::SET);
     }
 
     pub fn enable(&mut self) {
         // 使能UART
         self.regs().cr.modify(CR::UARTEN::SET);
     }
-    
+
     pub fn disable(&mut self) {
         // 失能UART
         self.regs().cr.modify(CR::UARTEN::CLEAR);
@@ -261,7 +258,7 @@ impl Pl011Uart {
         // 如果接收FIFO为空则返回0
         if self.regs().fr.is_set(FR::RXFE) {
             return 0x00;
-        } 
+        }
         // 读取数据寄存器
         (self.regs().dr.read(DR::DATA) & 0xFF) as u8
     }
@@ -273,4 +270,3 @@ impl Pl011Uart {
         self.regs().dr.write(DR::DATA.val(byte as u32));
     }
 }
-
