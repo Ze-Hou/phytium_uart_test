@@ -69,7 +69,9 @@ mod tests {
             let mut uart = PL011_UART.lock();
             let pl011_uart = uart.as_mut().unwrap();
 
-            pl011_uart.write_bytes(b"hello,phytium async uart\r\n").await;
+            pl011_uart
+                .write_bytes(b"hello,phytium async uart\r\n")
+                .await;
             println!("irq count {}\r\n", pl011_uart.get_tx_irq_count());
         });
     }
