@@ -10,10 +10,16 @@ mod tests {
     use log::info;
 
     use bare_test::{
+        GetIrqConfig,
         globals::{PlatformInfoKind, global_val},
+        irq::{IrqInfo, IrqParam},
         mem::iomap,
         println,
     };
+
+    use pl011::{Pl011Uart, mutex::Mutex};
+
+    static PL011_UART: Mutex<Option<Pl011Uart>> = Mutex::new(None);
 
     #[test]
     fn it_works() {
@@ -28,23 +34,43 @@ mod tests {
     fn test_uart() {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
         let dbt = fdt.get();
-        let uart_regs = dbt
-            .find_compatible(&["arm,pl011"])
-            .next()
-            .unwrap()
-            .reg()
-            .unwrap()
-            .next()
-            .unwrap();
+        let node = dbt.find_compatible(&["arm,pl011"]).next().unwrap();
+        let uart_regs = node.reg().unwrap().next().unwrap();
+        let irq_info = node.irq_info().unwrap();
+        println!("irq info {irq_info:?}");
+
+        let cfg = irq_info.cfgs[0].clone();
         let base = uart_regs.address;
 
-        // 映射到虚拟地址
         let mut mmio = iomap((base as usize).into(), uart_regs.size.unwrap());
-        let mut pl011_uart = pl011::Pl011Uart::new(unsafe { mmio.as_mut() });
 
-        // pl011_uart.init();
-        pl011_uart.write_byte_poll('A' as u8);
+        let mut pl011_uart = Pl011Uart::new(unsafe { mmio.as_mut() });
+        pl011_uart.init();
 
-        println!("\r\n");
+        {
+            let mut uart = PL011_UART.lock();
+            *uart = Some(pl011_uart);
+        }
+
+        // 注册中断处理
+        IrqParam {
+            intc: irq_info.irq_parent,
+            cfg,
+        }
+        .register_builder(|_| {
+            unsafe {
+                PL011_UART.force_use().as_mut().unwrap().handle_interrupt();
+            }
+            bare_test::irq::IrqHandleResult::Handled
+        })
+        .register();
+
+        spin_on::spin_on(async {
+            let mut uart = PL011_UART.lock();
+            let pl011_uart = uart.as_mut().unwrap();
+
+            pl011_uart.write_bytes(b"hello,phytium async uart\r\n").await;
+            println!("irq count {}\r\n", pl011_uart.get_tx_irq_count());
+        });
     }
 }

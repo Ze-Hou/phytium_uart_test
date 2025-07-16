@@ -10,7 +10,7 @@
             "request": "launch",
             "miDebuggerServerAddress": "localhost:1234",
             "program": "${workspaceFolder}/target/kernel.elf",
-            "miDebuggerPath": "gdb-multiarch",
+            "miDebuggerPath": "/usr/bin/gdb-multiarch",
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "debug test"
         },

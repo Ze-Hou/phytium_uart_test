@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
-mod pl011;
+pub mod mutex;
 
+mod pl011;
 pub use pl011::Pl011Uart;

@@ -1,4 +1,5 @@
 use core::ptr::NonNull;
+use futures::task::AtomicWaker;
 use tock_registers::{
     interfaces::{ReadWriteable, Readable, Writeable},
     register_bitfields, register_structs,
@@ -199,6 +200,9 @@ register_bitfields![u32,
 
 pub struct Pl011Uart {
     base: NonNull<Pl011UartRegs>,
+    waker: AtomicWaker,
+    tx_irq_cnt: usize,
+    rx_irq_cnt: usize,
 }
 
 unsafe impl Send for Pl011Uart {}
@@ -208,6 +212,9 @@ impl Pl011Uart {
     pub const fn new(base: *mut u8) -> Self {
         Self {
             base: NonNull::new(base).unwrap().cast(),
+            waker: AtomicWaker::new(),
+            rx_irq_cnt: 0,
+            tx_irq_cnt: 0,
         }
     }
     const fn regs(&self) -> &Pl011UartRegs {
@@ -236,8 +243,12 @@ impl Pl011Uart {
         self.regs()
             .lcr_h
             .write(LCRH::WLEN::len8 + LCRH::STP2::CLEAR + LCRH::PEN::CLEAR + LCRH::FEN::SET);
-        // 失能中断
-        self.regs().imsc.set(0);
+        // 使能发送接收中断
+        self.regs().imsc.write(IMSC::TXIM::SET + IMSC::RXIM::SET);
+        // 设置发送FIFO中断阈值为3/4, 接收FIFO中断阈值为1/2
+        self.regs()
+            .ifls
+            .write(IFLS::TXIFLSEL::tx3_4 + IFLS::RXIFLSEL::rx1_2);
         // 使能UART, 发送与接收
         self.regs()
             .cr
@@ -268,5 +279,66 @@ impl Pl011Uart {
         while self.regs().fr.is_set(FR::TXFF) {}
         // 写入数据寄存器
         self.regs().dr.write(DR::DATA.val(byte as u32));
+    }
+
+    pub fn write_bytes<'a>(&'a mut self, b: &'a [u8]) -> impl Future<Output = usize> + 'a {
+        WriteFuture {
+            uart: self,
+            bytes: b,
+            n: 0,
+        }
+    }
+
+    pub fn handle_interrupt(&mut self) {
+        // 如果发送FIFO不满, 继续向FIFO写入数据
+        if !self.regs().fr.is_set(FR::TXFF) {
+            self.waker.wake();
+            self.tx_irq_cnt += 1;
+        }
+
+        // 如果接收FIFO满, 从FIFO读取数据
+        if self.regs().fr.is_set(FR::RXFF) {
+            self.rx_irq_cnt += 1;
+        }
+
+        // 清除中断
+        self.regs().icr.write(ICR::RXIC::SET + ICR::TXIC::SET);
+    }
+
+    pub fn get_tx_irq_count(&self) -> usize {
+        self.tx_irq_cnt
+    }
+
+    pub fn get_rx_irq_count(&self) -> usize {
+        self.rx_irq_cnt
+    }
+}
+
+pub struct WriteFuture<'a> {
+    uart: &'a Pl011Uart,
+    bytes: &'a [u8],
+    n: usize,
+}
+
+impl<'a> Future for WriteFuture<'a> {
+    type Output = usize;
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        loop {
+            if this.n >= this.bytes.len() {
+                return core::task::Poll::Ready(this.n);
+            }
+            if this.uart.regs().fr.is_set(FR::TXFF) {
+                // not ready to send
+                this.uart.waker.register(cx.waker());
+                return core::task::Poll::Pending;
+            }
+            let b = this.bytes[this.n];
+            this.uart.regs().dr.write(DR::DATA.val(b as u32));
+            this.n += 1;
+        }
     }
 }
