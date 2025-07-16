@@ -42,9 +42,9 @@ mod tests {
         let mut mmio = iomap((base as usize).into(), uart_regs.size.unwrap());
         let mut pl011_uart = pl011::Pl011Uart::new(unsafe { mmio.as_mut() });
 
-        pl011_uart.init();
+        // pl011_uart.init();
         pl011_uart.write_byte_poll('A' as u8);
-        
+
         println!("\r\n");
         
     }
